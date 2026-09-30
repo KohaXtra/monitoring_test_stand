@@ -1,0 +1,57 @@
+# Mimir в монолитном режиме (single-binary) — идеально для локальной разработки
+target: all
+
+server:
+  http_listen_port: 9009
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data
+
+blocks_storage:
+  filesystem:
+    dir: /data/blocks
+  # TSDB ингестера (свежие, ещё не выгруженные в блоки метрики) — в томе,
+  # иначе по умолчанию ./tsdb/ внутри контейнера и теряется при пересоздании.
+  tsdb:
+    dir: /data/tsdb
+
+compactor:
+  data_dir: /data/compactor
+
+ingester:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+    replication_factor: 1
+
+distributor:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/rules
+
+alertmanager_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/alertmanager
+
+multitenancy_enabled: false
+limits:
+  # Шардинг запросов бьёт каждый PromQL-запрос на 16 подзапросов. В монолите
+  # на одной машине он ничего не ускоряет, а дашборд с десятками панелей
+  # (Node Exporter Full) переполняет очередь (max_outstanding_requests_per_tenant: 100)
+  # и панели получают 429 "too many outstanding requests".
+  query_sharding_total_shards: 0

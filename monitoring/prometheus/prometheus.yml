@@ -1,0 +1,21 @@
+# Prometheus как «локальная память»: скрейпит те же цели, что и Alloy, хранит коротко (см. --storage.tsdb.retention.time).
+# В Mimir не пишет намеренно: Alloy уже шлёт туда те же серии, второй remote_write дал бы дубли.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: fastapi
+    static_configs:
+      - targets: ["app:8000"]
+
+  - job_name: node_exporter
+    static_configs:
+      # node-exporter в сети хоста (network_mode: host) — ходим к нему через шлюз docker.
+      # instance фиксируем прежним, чтобы не рвались серии и переменные дашбордов.
+      - targets: ["host.docker.internal:9100"]
+        labels:
+          instance: node-exporter:9100

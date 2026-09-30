@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+
+# Локальные настройки портов (шаблон — monitoring/.env.example)
+monitoring/.env

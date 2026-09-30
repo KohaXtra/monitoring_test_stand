@@ -1,0 +1,91 @@
+// ---------- Метрики -> Mimir ----------
+
+// Scrape Node Exporter metrics
+prometheus.scrape "node_exporter" {
+  targets = [
+    // node-exporter в сети хоста; instance прежний — серии в Mimir не рвутся.
+    {__address__ = "host.docker.internal:9100", instance = "node-exporter:9100", job = "node_exporter"},
+  ]
+  forward_to = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+}
+
+// Scrape FastAPI app (сервис app в той же compose-сети)
+prometheus.scrape "fastapi" {
+  targets = [
+    {__address__ = "app:8000", job = "fastapi"},
+  ]
+  metrics_path   = "/metrics"
+  forward_to     = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+}
+
+// Forward metrics to Mimir
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
+
+// ---------- Логи контейнеров -> Loki ----------
+
+// Находим контейнеры через docker-сокет.
+// Фильтр по лейблу compose обязателен: без него Alloy подписывается на логи
+// ВСЕХ контейнеров машины, включая чужие проекты. Значение совпадает с
+// COMPOSE_PROJECT_NAME из monitoring/.env.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=monitoring"]
+  }
+}
+
+// Релейблинг метаданных (до чтения логов): из __meta_* делаем лейблы.
+// В лейблы — только то, чего мало и что конечно.
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.containers.receiver]
+}
+
+// Обработка содержимого строки (после чтения): вынимаем level в лейбл.
+// request_id, route, status в лейблы НЕ идут — парсятся на лету через `| json`.
+loki.process "containers" {
+  stage.match {
+    selector = "{service=\"app\"}"
+
+    stage.json {
+      expressions = {level = "level"}
+    }
+    stage.labels {
+      values = {level = ""}
+    }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Alloy UI доступен на http://localhost:12345
